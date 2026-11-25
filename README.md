@@ -47,7 +47,7 @@ body-temperature probe.
 pip install -r cloud/requirements-dev.txt websockets
 python tools/local_gateway.py                 # terminal 1: stands in for API Gateway + DynamoDB
 python tools/fake_dashboard.py                # terminal 2: prints what Unreal receives
-MICROPYTHON=/path/to/micropython tools/run_device_on_laptop.sh   # terminal 3: the real device code, fake sensors
+MICROPYTHON=/path/to/micropython sh tools/run_device_on_laptop.sh   # terminal 3: the real device code, fake sensors
 ```
 `tools/e2e_test.py` does all three and checks the dashboard receives levels 0, 1, 2, 0.
 
