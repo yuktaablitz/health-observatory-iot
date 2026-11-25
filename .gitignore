@@ -1,0 +1,15 @@
+# Secrets: copy device/config.example.py to device/config.py locally
+device/config.py
+__pycache__/
+*.pyc
+.pytest_cache/
+.aws-sam/
+samconfig.toml
+
+# Unreal Engine build output
+visualizer/Binaries/
+visualizer/Intermediate/
+visualizer/Saved/
+visualizer/DerivedDataCache/
+visualizer/.vs/
+visualizer/*.sln

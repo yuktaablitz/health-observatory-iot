@@ -1,0 +1,190 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Health Observatory - WebSocket API, Lambda handlers and DynamoDB tables
+
+Parameters:
+  StageName:
+    Type: String
+    Default: dev
+  NormalMaxC:
+    Type: String
+    Default: "30.0"
+    Description: Upper bound of the normal band in deg C (37.5 for a body-temperature probe)
+  ElevatedMaxC:
+    Type: String
+    Default: "31.0"
+    Description: Upper bound of the elevated band in deg C (38.5 for a body-temperature probe)
+
+Globals:
+  Function:
+    Runtime: python3.12
+    CodeUri: functions/
+    Timeout: 10
+    MemorySize: 128
+    Environment:
+      Variables:
+        CONNECTIONS_TABLE: !Ref ConnectionsTable
+        READINGS_TABLE: !Ref ReadingsTable
+        NORMAL_MAX_C: !Ref NormalMaxC
+        ELEVATED_MAX_C: !Ref ElevatedMaxC
+
+Resources:
+  ConnectionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: connectionid
+          AttributeType: S
+      KeySchema:
+        - AttributeName: connectionid
+          KeyType: HASH
+
+  ReadingsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: patient_id
+          AttributeType: S
+        - AttributeName: ts
+          AttributeType: N
+      KeySchema:
+        - AttributeName: patient_id
+          KeyType: HASH
+        - AttributeName: ts
+          KeyType: RANGE
+
+  VitalsApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: health-observatory
+      ProtocolType: WEBSOCKET
+      RouteSelectionExpression: "$request.body.action"
+
+  ConnectFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: handlers.connect
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref ConnectionsTable }
+
+  DisconnectFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: handlers.disconnect
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref ConnectionsTable }
+
+  DefaultFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: handlers.default
+
+  OnMessageFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: handlers.on_message
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref ConnectionsTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref ReadingsTable }
+        - Statement:
+            - Effect: Allow
+              Action: execute-api:ManageConnections
+              Resource: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${VitalsApi}/${StageName}/POST/@connections/*
+
+  ConnectIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref VitalsApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ConnectFunction.Arn}/invocations
+  DisconnectIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref VitalsApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${DisconnectFunction.Arn}/invocations
+  DefaultIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref VitalsApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${DefaultFunction.Arn}/invocations
+  OnMessageIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref VitalsApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${OnMessageFunction.Arn}/invocations
+
+  ConnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref VitalsApi
+      RouteKey: $connect
+      Target: !Sub integrations/${ConnectIntegration}
+  DisconnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref VitalsApi
+      RouteKey: $disconnect
+      Target: !Sub integrations/${DisconnectIntegration}
+  DefaultRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref VitalsApi
+      RouteKey: $default
+      Target: !Sub integrations/${DefaultIntegration}
+  OnMessageRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref VitalsApi
+      RouteKey: onMessage
+      Target: !Sub integrations/${OnMessageIntegration}
+
+  Deployment:
+    Type: AWS::ApiGatewayV2::Deployment
+    DependsOn: [ConnectRoute, DisconnectRoute, DefaultRoute, OnMessageRoute]
+    Properties:
+      ApiId: !Ref VitalsApi
+  Stage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref VitalsApi
+      StageName: !Ref StageName
+      DeploymentId: !Ref Deployment
+
+  ConnectPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref ConnectFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${VitalsApi}/*
+  DisconnectPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref DisconnectFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${VitalsApi}/*
+  DefaultPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref DefaultFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${VitalsApi}/*
+  OnMessagePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref OnMessageFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${VitalsApi}/*
+
+Outputs:
+  WebSocketUrl:
+    Description: Put this in device/config.py (add ?role=device) and in the Unreal config
+    Value: !Sub wss://${VitalsApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}

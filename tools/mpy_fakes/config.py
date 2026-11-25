@@ -1,0 +1,9 @@
+WIFI_SSID = "laptop"
+WIFI_PASSWORD = "unused"
+WS_URL = "ws://127.0.0.1:8765/dev?role=device"
+PATIENT_ID = "bed-01"
+SEND_INTERVAL_S = 0.2
+DHT22_PIN = 14
+I2C_SCL_PIN = 22
+I2C_SDA_PIN = 21
+STATUS_LED_PIN = 2
