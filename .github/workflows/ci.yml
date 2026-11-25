@@ -1,0 +1,33 @@
+name: CI
+on: [push, pull_request]
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -r cloud/requirements-dev.txt websockets
+      - name: Cloud unit tests
+        run: python -m pytest -q cloud/tests
+      - name: Device unit tests
+        run: python -m pytest -q device/tests
+      - name: Lint CloudFormation template
+        run: cfn-lint cloud/template.yaml
+
+  end-to-end:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -r cloud/requirements-dev.txt websockets
+      - name: Build MicroPython (unix port)
+        run: |
+          git clone --depth 1 https://github.com/micropython/micropython.git /tmp/mpy
+          make -C /tmp/mpy/mpy-cross -j4
+          make -C /tmp/mpy/ports/unix submodules
+          make -C /tmp/mpy/ports/unix -j4
+      - name: Device -> gateway -> Lambda -> dashboard
+        run: MICROPYTHON=/tmp/mpy/ports/unix/build-standard/micropython python tools/e2e_test.py
